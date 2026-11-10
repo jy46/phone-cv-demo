@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>OpenCV Edge Detection Live Lab</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons for Mobile Touch UI -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- Google Font Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* iOS specific smooth slider styles */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: #27272a;
+      border-radius: 9999px;
+      height: 8px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 22px;
+      width: 22px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #0f172a;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      cursor: pointer;
+    }
+    /* Prevent pull-to-refresh on mobile */
+    html, body {
+      overscroll-behavior-y: contain;
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col justify-between overflow-x-hidden">
+
+  <!-- Header -->
+  <header class="w-full bg-zinc-900/80 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3 sticky top-0 z-40 flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <div class="w-7 h-7 rounded-lg bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-400">
+        <i class="ph-bold ph-eye text-base"></i>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
+          EdgeCV Mobile
+          <span id="cv-status-badge" class="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium px-1.5 py-0.5 rounded-full">
+            Loading WASM...
+          </span>
+        </h1>
+      </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="flex items-center gap-2 mono text-[11px]">
+      <div class="bg-zinc-800/80 px-2 py-1 rounded-md border border-zinc-700/50 flex items-center gap-1">
+        <span class="text-zinc-400">FPS:</span>
+        <span id="fps-val" class="text-emerald-400 font-semibold">0</span>
+      </div>
+      <div class="bg-zinc-800/80 px-2 py-1 rounded-md border border-zinc-700/50 flex items-center gap-1">
+        <span class="text-zinc-400">MS:</span>
+        <span id="ms-val" class="text-sky-400 font-semibold">0</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Viewport Area -->
+  <main class="flex-1 flex flex-col items-center justify-center p-3 relative max-w-lg mx-auto w-full">
+    
+    <!-- Video / Canvas Container -->
+    <div class="relative w-full aspect-[3/4] sm:aspect-[4/5] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center">
+      
+      <!-- Hidden Video Element for capturing raw camera feed -->
+      <video id="webcam" autoplay playsinline muted class="hidden"></video>
+
+      <!-- Offscreen image container for uploaded pictures -->
+      <img id="static-image" class="hidden" alt="Uploaded fallback">
+
+      <!-- Interactive Output Canvas -->
+      <canvas id="canvas-output" class="w-full h-full object-cover"></canvas>
+
+      <!-- Active Mode Floating Pill -->
+      <div class="absolute top-3 left-3 bg-zinc-950/80 backdrop-blur-md border border-zinc-700/60 rounded-full px-3 py-1 flex items-center gap-1.5 text-xs font-semibold shadow-lg">
+        <span id="mode-dot" class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>
+        <span id="active-mode-label" class="text-zinc-200">Canny Edge</span>
+      </div>
+
+      <!-- Resolution Pill -->
+      <div class="absolute top-3 right-3 bg-zinc-950/80 backdrop-blur-md border border-zinc-700/60 rounded-full px-2.5 py-1 text-[11px] mono text-zinc-300">
+        <span id="res-display">0x0</span>
+      </div>
+
+      <!-- Loading / Placeholder Overlay -->
+      <div id="loader-overlay" class="absolute inset-0 bg-zinc-950/90 flex flex-col items-center justify-center p-6 text-center z-20">
+        <div id="loader-spinner" class="w-10 h-10 border-4 border-sky-500/20 border-t-sky-400 rounded-full animate-spin mb-4"></div>
+        <p id="loader-text" class="text-sm font-medium text-zinc-300">Compiling OpenCV.js WebAssembly...</p>
+        <p class="text-xs text-zinc-500 mt-1">This takes ~2-5s on initial mobile download</p>
+      </div>
+
+      <!-- Permission Denied / Fallback Message Box -->
+      <div id="camera-fallback-msg" class="hidden absolute inset-0 bg-zinc-900/95 flex flex-col items-center justify-center p-6 text-center z-10">
+        <i class="ph-bold ph-camera-slash text-4xl text-amber-400 mb-2"></i>
+        <h3 class="text-base font-bold text-zinc-100">Camera Access Blocked</h3>
+        <p class="text-xs text-zinc-400 mt-1 mb-4 max-w-xs">Camera permissions are disabled or HTTPS is missing. You can snap a photo or pick an image to run the pipeline.</p>
+        <button onclick="document.getElementById('file-input').click()" class="bg-sky-500 text-zinc-950 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-sky-500/20 active:scale-95 transition-transform">
+          <i class="ph-bold ph-image text-base"></i>
+          Choose Photo to Test
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Quick Toolstrip Under Canvas -->
+    <div class="flex items-center justify-between w-full mt-2 px-1 text-xs text-zinc-400">
+      <div class="flex items-center gap-2">
+        <button id="btn-toggle-camera" onclick="switchCameraFacing()" class="bg-zinc-800/90 hover:bg-zinc-700 active:scale-95 text-zinc-200 border border-zinc-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+          <i class="ph-bold ph-camera-rotate text-sm text-sky-400"></i>
+          <span id="cam-facing-txt">Back Camera</span>
+        </button>
+        <button onclick="document.getElementById('file-input').click()" class="bg-zinc-800/90 hover:bg-zinc-700 active:scale-95 text-zinc-200 border border-zinc-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+          <i class="ph-bold ph-upload-simple text-sm text-amber-400"></i>
+          <span>Upload</span>
+        </button>
+        <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
+      </div>
+      <button id="btn-pause" onclick="togglePause()" class="bg-zinc-800/90 hover:bg-zinc-700 active:scale-95 text-zinc-200 border border-zinc-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+        <i id="pause-icon" class="ph-bold ph-pause text-sm text-emerald-400"></i>
+        <span id="pause-txt">Freeze</span>
+      </button>
+    </div>
+
+  </main>
+
+  <!-- Control Sheet (Tailored for Bottom Mobile Thumbs) -->
+  <section class="bg-zinc-900 border-t border-zinc-800 rounded-t-3xl p-4 w-full max-w-lg mx-auto shadow-2xl space-y-4">
+    
+    <!-- Mode Switcher Tabs (Matches Python code stages) -->
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Pipeline Stage</span>
+        <span class="text-[11px] text-zinc-500">Select model step</span>
+      </div>
+      <div class="grid grid-cols-4 gap-1.5 bg-zinc-950 p-1.5 rounded-xl border border-zinc-800">
+        <button onclick="setMode('raw')" id="mode-btn-raw" class="mode-tab py-2 text-center rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition">
+          Raw
+        </button>
+        <button onclick="setMode('gray')" id="mode-btn-gray" class="mode-tab py-2 text-center rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition">
+          Blur
+        </button>
+        <button onclick="setMode('sobel')" id="mode-btn-sobel" class="mode-tab py-2 text-center rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition">
+          Sobel
+        </button>
+        <button onclick="setMode('canny')" id="mode-btn-canny" class="mode-tab py-2 text-center rounded-lg text-xs font-semibold bg-sky-500 text-zinc-950 shadow-md transition">
+          Canny
+        </button>
+      </div>
+    </div>
+
+    <!-- Sliders and Parameter Tuning -->
+    <div class="space-y-3 bg-zinc-950/60 p-3.5 rounded-2xl border border-zinc-800/70">
+      
+      <!-- Canny Threshold 1 (Low) -->
+      <div id="control-t1" class="space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-zinc-300 font-medium">Canny Threshold 1 (Min)</span>
+          <span id="val-t1" class="mono text-sky-400 font-semibold">50</span>
+        </div>
+        <input type="range" id="slider-t1" min="1" max="255" value="50" class="w-full" oninput="updateParams()">
+      </div>
+
+      <!-- Canny Threshold 2 (High) -->
+      <div id="control-t2" class="space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-zinc-300 font-medium">Canny Threshold 2 (Max)</span>
+          <span id="val-t2" class="mono text-sky-400 font-semibold">120</span>
+        </div>
+        <input type="range" id="slider-t2" min="1" max="255" value="120" class="w-full" oninput="updateParams()">
+      </div>
+
+      <!-- Gaussian Blur Kernel Size -->
+      <div class="space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-zinc-300 font-medium">Gaussian Kernel Size: <span id="val-blur" class="mono text-amber-400 font-semibold">3x3</span></span>
+          <span class="text-[10px] text-zinc-500">Noise reduction</span>
+        </div>
+        <input type="range" id="slider-blur" min="1" max="15" step="2" value="3" class="w-full" oninput="updateParams()">
+      </div>
+
+      <!-- Sobel Kernel Size (Only visible when Sobel active or general) -->
+      <div id="control-sobel-k" class="space-y-1">
+        <div class="flex justify-between text-xs">
+          <span class="text-zinc-300 font-medium">Sobel K-Size: <span id="val-sobel" class="mono text-purple-400 font-semibold">5</span></span>
+          <span class="text-[10px] text-zinc-500">Derivative aperture</span>
+        </div>
+        <input type="range" id="slider-sobel" min="1" max="7" step="2" value="5" class="w-full" oninput="updateParams()">
+      </div>
+
+    </div>
+
+    <!-- Python Code Snippet Accordion (Instructional Tool for Students) -->
+    <details class="bg-zinc-950/80 rounded-xl border border-zinc-800 text-xs overflow-hidden">
+      <summary class="px-3 py-2 cursor-pointer font-medium text-zinc-400 hover:text-zinc-200 flex items-center justify-between">
+        <span class="flex items-center gap-1.5"><i class="ph-bold ph-code"></i> Equivalent Python Line</span>
+        <i class="ph-bold ph-caret-down text-zinc-500"></i>
+      </summary>
+      <div class="p-3 bg-black/40 border-t border-zinc-800/80 mono text-[11px] text-emerald-400 overflow-x-auto whitespace-pre">
+<span id="python-equivalent-code"># Canny edge detection
+canny = cv2.Canny(img_blur, threshold1=50, threshold2=120)</span>
+      </div>
+    </details>
+
+  </section>
+
+  <!-- OpenCV.js Official WebAssembly Build -->
+  <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()" type="text/javascript"></script>
+
+  <!-- Application Logic -->
+  <script>
+    // App State
+    let isCvReady = false;
+    let isPaused = false;
+    let activeMode = 'canny'; // 'raw', 'gray', 'sobel', 'canny'
+    let currentFacingMode = 'environment'; // 'environment' = back, 'user' = selfie
+    let videoStream = null;
+    let isStaticMode = false;
+
+    // Parameters corresponding to the user's python script
+    let cannyT1 = 50;
+    let cannyT2 = 120;
+    let blurKsize = 3;
+    let sobelKsize = 5;
+
+    // Performance Metrics
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let fps = 0;
+
+    // DOM Elements
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas-output');
+    const ctx = canvas.getContext('2d');
+    const staticImg = document.getElementById('static-image');
+
+    const fpsDisplay = document.getElementById('fps-val');
+    const msDisplay = document.getElementById('ms-val');
+    const resDisplay = document.getElementById('res-display');
+    const loaderOverlay = document.getElementById('loader-overlay');
+    const loaderText = document.getElementById('loader-text');
+    const statusBadge = document.getElementById('cv-status-badge');
+    const modeLabel = document.getElementById('active-mode-label');
+    const pythonCodeBox = document.getElementById('python-equivalent-code');
+
+    // Pre-allocated OpenCV Mats to prevent garbage collection hiccups and memory leaks
+    let srcMat = null;
+    let grayMat = null;
+    let blurMat = null;
+    let dstMat = null;
+    let sobelX = null;
+    let sobelY = null;
+    let sobelAbs = null;
+
+    /**
+     * OpenCV.js WASM Ready Callback
+     */
+    function onOpenCvReady() {
+      // Ensure cv runtime is actually initialized
+      if (cv.getBuildInformation) {
+        initCvPipeline();
+      } else {
+        cv['onRuntimeInitialized'] = () => {
+          initCvPipeline();
+        };
+      }
+    }
+
+    function initCvPipeline() {
+      isCvReady = true;
+      loaderText.innerText = "Requesting mobile camera...";
+      statusBadge.innerText = "WASM Active";
+      statusBadge.className = "text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium px-1.5 py-0.5 rounded-full";
+
+      startCamera();
+    }
+
+    /**
+     * Camera Management with iOS Safari compatibility
+     */
+    async function startCamera() {
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+      }
+
+      // Constraints optimized for real-time mobile CV processing
+      // Processing 480p/640p gives 30-60 FPS without overheating phones
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: { ideal: currentFacingMode },
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      };
+
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = videoStream;
+        await video.play();
+
+        video.onloadedmetadata = () => {
+          isStaticMode = false;
+          loaderOverlay.classList.add('hidden');
+          document.getElementById('camera-fallback-msg').classList.add('hidden');
+
+          // Match canvas internal resolution to video source
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          resDisplay.innerText = `${canvas.width}x${canvas.height}`;
+
+          allocateMatrices(canvas.width, canvas.height);
+          requestAnimationFrame(processFrame);
+        };
+      } catch (err) {
+        console.error("Camera access failed:", err);
+        loaderOverlay.classList.add('hidden');
+        document.getElementById('camera-fallback-msg').classList.remove('hidden');
+      }
+    }
+
+    function switchCameraFacing() {
+      currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+      document.getElementById('cam-facing-txt').innerText = currentFacingMode === 'environment' ? 'Back Camera' : 'Front Camera';
+      startCamera();
+    }
+
+    /**
+     * Memory Management: Pre-allocate reusable OpenCV Mats
+     */
+    function allocateMatrices(w, h) {
+      // Clean old allocations if re-initializing
+      cleanupMatrices();
+
+      srcMat = new cv.Mat(h, w, cv.CV_8UC4);
+      grayMat = new cv.Mat(h, w, cv.CV_8UC1);
+      blurMat = new cv.Mat(h, w, cv.CV_8UC1);
+      dstMat = new cv.Mat(h, w, cv.CV_8UC1);
+      sobelX = new cv.Mat(h, w, cv.CV_16S);
+      sobelAbs = new cv.Mat(h, w, cv.CV_8UC1);
+    }
+
+    function cleanupMatrices() {
+      if (srcMat) srcMat.delete();
+      if (grayMat) grayMat.delete();
+      if (blurMat) blurMat.delete();
+      if (dstMat) dstMat.delete();
+      if (sobelX) sobelX.delete();
+      if (sobelAbs) sobelAbs.delete();
+    }
+
+    /**
+     * Real-Time Core Loop (Mirrors user Python script)
+     */
+    function processFrame() {
+      if (!isCvReady || isPaused) {
+        if (!isPaused) requestAnimationFrame(processFrame);
+        return;
+      }
+
+      const t0 = performance.now();
+
+      try {
+        if (!isStaticMode) {
+          // 1. Grab image frame from webcam into canvas context
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+
+        // 2. Read context image data into OpenCV srcMat
+        let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        srcMat.data.set(imgData.data);
+
+        // 3. Execution pipeline matching student Python code:
+        if (activeMode === 'raw') {
+          // Show directly without edge transformation
+          // The canvas already holds the rendered video frame
+        } else {
+          // # Convert to grayscale
+          // img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+          cv.cvtColor(srcMat, grayMat, cv.COLOR_RGBA2GRAY);
+
+          // # GaussianBlur (3x3)
+          // img_blur = cv2.GaussianBlur(img_gray, (3,3), 0)
+          let kSize = new cv.Size(blurKsize, blurKsize);
+          cv.GaussianBlur(grayMat, blurMat, kSize, 0, 0, cv.BORDER_DEFAULT);
+
+          if (activeMode === 'gray') {
+            // Display blurred grayscale
+            cv.imshow('canvas-output', blurMat);
+          } 
+          else if (activeMode === 'sobel') {
+            // # Sobel edge detection
+            // sobelx = cv2.Sobel(src=img_blur, ddepth=cv2.CV_64F, dx=1, dy=1, ksize=5)
+            // In OpenCV.js, 16-bit signed is standard for gradient depth
+            cv.Sobel(blurMat, sobelX, cv.CV_16S, 1, 1, sobelKsize, 1, 0, cv.BORDER_DEFAULT);
+            cv.convertScaleAbs(sobelX, sobelAbs);
+            cv.imshow('canvas-output', sobelAbs);
+          } 
+          else if (activeMode === 'canny') {
+            // # Canny edge detection
+            // canny_edges = cv2.Canny(image=img_blur, threshold1=50, threshold2=120)
+            cv.Canny(blurMat, dstMat, cannyT1, cannyT2, 3, false);
+            cv.imshow('canvas-output', dstMat);
+          }
+        }
+
+      } catch (err) {
+        console.warn("CV processing exception:", err);
+      }
+
+      // Calculate Latency & FPS
+      const t1 = performance.now();
+      const latency = Math.round(t1 - t0);
+      msDisplay.innerText = latency;
+
+      frameCount++;
+      if (t1 - lastTime >= 1000) {
+        fps = frameCount;
+        fpsDisplay.innerText = fps;
+        frameCount = 0;
+        lastTime = t1;
+      }
+
+      if (!isStaticMode) {
+        requestAnimationFrame(processFrame);
+      }
+    }
+
+    /**
+     * Interactive Controls
+     */
+    function updateParams() {
+      cannyT1 = parseInt(document.getElementById('slider-t1').value, 10);
+      cannyT2 = parseInt(document.getElementById('slider-t2').value, 10);
+      blurKsize = parseInt(document.getElementById('slider-blur').value, 10);
+      sobelKsize = parseInt(document.getElementById('slider-sobel').value, 10);
+
+      // Ensure odd numbers for kernels
+      if (blurKsize % 2 === 0) blurKsize += 1;
+      if (sobelKsize % 2 === 0) sobelKsize += 1;
+
+      document.getElementById('val-t1').innerText = cannyT1;
+      document.getElementById('val-t2').innerText = cannyT2;
+      document.getElementById('val-blur').innerText = `${blurKsize}x${blurKsize}`;
+      document.getElementById('val-sobel').innerText = sobelKsize;
+
+      updatePythonSnippet();
+
+      if (isStaticMode || isPaused) {
+        processFrame();
+      }
+    }
+
+    function setMode(mode) {
+      activeMode = mode;
+      
+      // Update UI active tab state
+      document.querySelectorAll('.mode-tab').forEach(el => {
+        el.className = 'mode-tab py-2 text-center rounded-lg text-xs font-medium text-zinc-400 hover:text-white transition';
+      });
+
+      const activeBtn = document.getElementById(`mode-btn-${mode}`);
+      activeBtn.className = 'mode-tab py-2 text-center rounded-lg text-xs font-semibold bg-sky-500 text-zinc-950 shadow-md transition';
+
+      const labels = {
+        raw: 'Original Camera Feed',
+        gray: 'Grayscale + GaussianBlur',
+        sobel: `Sobel Gradient (k=${sobelKsize})`,
+        canny: `Canny Edge (${cannyT1}, ${cannyT2})`
+      };
+      modeLabel.innerText = labels[mode];
+
+      updatePythonSnippet();
+
+      if (isStaticMode || isPaused) {
+        processFrame();
+      }
+    }
+
+    function updatePythonSnippet() {
+      if (activeMode === 'raw') {
+        pythonCodeBox.innerText = `# Raw Color Image\nimg = cv2.imread('test.jpg')\ncv2_imshow(img)`;
+      } else if (activeMode === 'gray') {
+        pythonCodeBox.innerText = `# Grayscale + Blur\nimg_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\nimg_blur = cv2.GaussianBlur(img_gray, (${blurKsize}, ${blurKsize}), 0)\ncv2_imshow(img_blur)`;
+      } else if (activeMode === 'sobel') {
+        pythonCodeBox.innerText = `# Sobel edge detection\nsobelx = cv2.Sobel(src=img_blur, ddepth=cv2.CV_64F, dx=1, dy=1, ksize=${sobelKsize})\ncv2_imshow(sobelx)`;
+      } else if (activeMode === 'canny') {
+        pythonCodeBox.innerText = `# Canny edge detection\ncanny_edges = cv2.Canny(image=img_blur, threshold1=${cannyT1}, threshold2=${cannyT2})\ncv2_imshow(canny_edges)`;
+      }
+    }
+
+    function togglePause() {
+      isPaused = !isPaused;
+      const btnTxt = document.getElementById('pause-txt');
+      const btnIcon = document.getElementById('pause-icon');
+
+      if (isPaused) {
+        btnTxt.innerText = "Resume";
+        btnIcon.className = "ph-bold ph-play text-sm text-amber-400";
+      } else {
+        btnTxt.innerText = "Freeze";
+        btnIcon.className = "ph-bold ph-pause text-sm text-emerald-400";
+        requestAnimationFrame(processFrame);
+      }
+    }
+
+    /**
+     * Static Photo Upload Fallback
+     */
+    function handleImageUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        staticImg.onload = function() {
+          isStaticMode = true;
+          document.getElementById('camera-fallback-msg').classList.add('hidden');
+          loaderOverlay.classList.add('hidden');
+
+          // Fit image to max 640px dimension for snappy mobile edge detection
+          const maxDim = 640;
+          let w = staticImg.naturalWidth;
+          let h = staticImg.naturalHeight;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          resDisplay.innerText = `${w}x${h}`;
+
+          allocateMatrices(w, h);
+          ctx.drawImage(staticImg, 0, 0, w, h);
+          processFrame();
+        };
+        staticImg.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Clean up WASM allocations when leaving the page
+    window.addEventListener('beforeunload', () => {
+      cleanupMatrices();
+    });
+  </script>
+</body>
+</html>
