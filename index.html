@@ -3,16 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Debridement CV Trainer (OpenCV.js)</title>
+  <title>Orange Cross-Section Segmentation & Area Estimator</title>
   <style>
     :root {
       --bg: #0f172a;
-      --card-bg: rgba(30, 41, 59, 0.9);
+      --card-bg: rgba(30, 41, 59, 0.95);
       --primary: #38bdf8;
       --accent: #f97316;
       --text: #f8fafc;
       --muted: #94a3b8;
       --border: #334155;
+      --peel: #22c55e;
+      --pith: #38bdf8;
+      --pulp: #f43f5e;
     }
 
     * {
@@ -20,7 +23,6 @@
       margin: 0;
       padding: 0;
       -webkit-tap-highlight-color: transparent;
-      user-select: none;
     }
 
     body {
@@ -37,7 +39,7 @@
 
     header {
       width: 100%;
-      max-width: 520px;
+      max-width: 540px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -45,7 +47,7 @@
     }
 
     h1 {
-      font-size: 1.05rem;
+      font-size: 1.02rem;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -72,39 +74,67 @@
       border: 1px solid var(--border);
     }
 
-    .legend {
+    .metrics-grid {
       width: 100%;
-      max-width: 520px;
-      display: flex;
-      justify-content: space-around;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px;
+      max-width: 540px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
       margin-bottom: 8px;
-      font-size: 0.72rem;
-      font-weight: 600;
     }
 
-    .legend-item {
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .metric-title {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--muted);
       display: flex;
       align-items: center;
       gap: 5px;
     }
 
     .dot {
-      width: 10px;
-      height: 10px;
+      width: 9px;
+      height: 9px;
       border-radius: 50%;
       display: inline-block;
+    }
+
+    .metric-value {
+      font-size: 1.25rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 5px;
+      background: #020617;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      transition: width 0.12s ease;
     }
 
     .viewport-container {
       position: relative;
       width: 100%;
-      max-width: 520px;
+      max-width: 540px;
       aspect-ratio: 4 / 3;
-      background: #000;
+      background: #020617;
       border-radius: 14px;
       overflow: hidden;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
@@ -114,7 +144,6 @@
       justify-content: center;
     }
 
-    /* Keep video rendered (not display:none) so mobile browsers never pause frame decoding */
     #webcam {
       position: absolute;
       top: 0;
@@ -131,43 +160,29 @@
       z-index: 2;
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
     }
 
-    .loader-overlay {
+    .empty-prompt {
       position: absolute;
       inset: 0;
-      background: rgba(15, 23, 42, 0.95);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 12px;
-      z-index: 20;
+      z-index: 10;
+      background: rgba(15, 23, 42, 0.92);
       padding: 20px;
       text-align: center;
-      transition: opacity 0.3s ease;
-    }
-
-    .spinner {
-      width: 32px;
-      height: 32px;
-      border: 3px solid rgba(255, 255, 255, 0.15);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
     }
 
     .mode-bar {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 6px;
       width: 100%;
-      max-width: 520px;
+      max-width: 540px;
       margin: 10px 0;
     }
 
@@ -175,13 +190,13 @@
       background: var(--card-bg);
       border: 1px solid var(--border);
       color: var(--muted);
-      padding: 8px 4px;
+      padding: 10px 4px;
       border-radius: 8px;
-      font-size: 0.72rem;
+      font-size: 0.75rem;
       font-weight: 600;
       cursor: pointer;
       text-align: center;
-      transition: all 0.2s;
+      touch-action: manipulation;
     }
 
     .mode-btn.active {
@@ -192,15 +207,14 @@
 
     .controls-card {
       width: 100%;
-      max-width: 520px;
+      max-width: 540px;
       background: var(--card-bg);
-      backdrop-filter: blur(8px);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 12px 14px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
     }
 
     .slider-group {
@@ -212,54 +226,53 @@
     .slider-header {
       display: flex;
       justify-content: space-between;
-      font-size: 0.75rem;
+      font-size: 0.76rem;
       color: var(--muted);
     }
 
     input[type="range"] {
-      -webkit-appearance: none;
       width: 100%;
-      height: 6px;
-      border-radius: 3px;
-      background: var(--border);
-      outline: none;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: var(--primary);
+      height: 26px;
+      background: transparent;
       cursor: pointer;
+      touch-action: pan-x;
     }
 
-    .action-row {
-      display: flex;
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
-      margin-top: 4px;
+      margin-top: 2px;
     }
 
     .action-btn {
-      flex: 1;
-      padding: 10px;
+      padding: 11px 6px;
       border: none;
       border-radius: 8px;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 600;
       color: #fff;
       background: #2563eb;
       cursor: pointer;
+      text-align: center;
+      touch-action: manipulation;
+    }
+
+    .action-btn.upload {
+      background: #059669;
+    }
+
+    .action-btn.secondary {
+      background: #334155;
     }
 
     #status-bar {
       width: 100%;
-      max-width: 520px;
+      max-width: 540px;
       margin-top: 8px;
       font-family: monospace;
-      font-size: 0.7rem;
-      color: #94a3b8;
+      font-size: 0.72rem;
+      color: #cbd5e1;
       text-align: center;
     }
   </style>
@@ -267,352 +280,592 @@
 <body>
 
   <header>
-    <h1>Debridement CV <span class="badge">3-Zone</span></h1>
-    <div id="fps-meter">0 FPS</div>
+    <h1>Orange Area Segmenter <span class="badge">Instant JS</span></h1>
+    <div id="fps-meter">READY</div>
   </header>
 
-  <div class="legend">
-    <div class="legend-item"><span class="dot" style="background:#22c55e;"></span>1. Outer Peel</div>
-    <div class="legend-item"><span class="dot" style="background:#38bdf8;"></span>2. White Pith</div>
-    <div class="legend-item"><span class="dot" style="background:#f43f5e;"></span>3. Inner Pulp</div>
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-title"><span class="dot" style="background:var(--peel);"></span>1. Outer Peel</div>
+      <div class="metric-value" id="pct-peel" style="color:var(--peel);">0.0%</div>
+      <div class="progress-track"><div class="progress-fill" id="bar-peel" style="background:var(--peel);"></div></div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-title"><span class="dot" style="background:var(--pith);"></span>2. White Pith</div>
+      <div class="metric-value" id="pct-pith" style="color:var(--pith);">0.0%</div>
+      <div class="progress-track"><div class="progress-fill" id="bar-pith" style="background:var(--pith);"></div></div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-title"><span class="dot" style="background:var(--pulp);"></span>3. Inner Pulp</div>
+      <div class="metric-value" id="pct-pulp" style="color:var(--pulp);">0.0%</div>
+      <div class="progress-track"><div class="progress-fill" id="bar-pulp" style="background:var(--pulp);"></div></div>
+    </div>
   </div>
 
   <div class="viewport-container">
-    <div id="loader" class="loader-overlay">
-      <div class="spinner"></div>
-      <div id="loader-msg" style="font-size: 0.85rem; color: var(--text);">Loading OpenCV.js...</div>
-      <button id="manual-start-btn" class="action-btn" style="display:none; max-width:200px; margin-top:8px;" onclick="startCamera(currentFacing)">Tap to Start Camera</button>
+    <div id="empty-prompt" class="empty-prompt">
+      <div style="font-size:0.9rem; color:var(--text); font-weight:600;">Upload an Orange Photo or Start Live Camera</div>
+      <div style="display:flex; gap:10px;">
+        <button class="action-btn upload" style="padding:12px 18px;" onclick="triggerPhotoUpload()">Upload Photo</button>
+        <button class="action-btn" style="padding:12px 18px;" onclick="startCamera(currentFacing)">Live Camera</button>
+      </div>
     </div>
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="output-canvas"></canvas>
   </div>
 
+  <input type="file" id="photo-input" accept="image/*" style="display:none;" onchange="handlePhotoUpload(event)" />
+
   <div class="mode-bar">
-    <button class="mode-btn active" onclick="setPipelineMode('debridement', this)">3-Zone Mark</button>
-    <button class="mode-btn" onclick="setPipelineMode('masks', this)">HSV Masks</button>
-    <button class="mode-btn" onclick="setPipelineMode('canny', this)">Canny Edges</button>
-    <button class="mode-btn" onclick="setPipelineMode('sobel', this)">Sobel</button>
+    <button class="mode-btn active" id="btn-fill" onclick="setPipelineMode('fill')">Segmented Fill</button>
+    <button class="mode-btn" id="btn-outline" onclick="setPipelineMode('outline')">Layer Boundaries</button>
+    <button class="mode-btn" id="btn-masks" onclick="setPipelineMode('masks')">Solid Map</button>
   </div>
 
   <div class="controls-card">
     <div class="slider-group">
       <div class="slider-header">
-        <span>Orange Saturation Threshold (Peel vs. Pith)</span>
-        <span id="sat-val">105</span>
+        <span>Orange vs. Pith Saturation Cutoff</span>
+        <span id="sat-val">48%</span>
       </div>
-      <input type="range" id="sat-thresh" min="40" max="180" value="105" oninput="updateSliders()" />
+      <input type="range" id="sat-thresh" min="15" max="80" value="48" oninput="onControlChange()" onchange="onControlChange()" />
     </div>
 
     <div class="slider-group">
       <div class="slider-header">
-        <span>Pith Brightness Floor (White Detection)</span>
-        <span id="val-val">135</span>
+        <span>White Pith Brightness Floor</span>
+        <span id="val-val">56%</span>
       </div>
-      <input type="range" id="val-thresh" min="70" max="220" value="135" oninput="updateSliders()" />
+      <input type="range" id="val-thresh" min="30" max="90" value="56" oninput="onControlChange()" onchange="onControlChange()" />
     </div>
 
     <div class="slider-group">
       <div class="slider-header">
-        <span>Canny Edge Sensitivity (Edges Mode)</span>
-        <span id="t1-val">60</span>
+        <span>Pith Ring Thickness Inset</span>
+        <span id="inset-val">4 px</span>
       </div>
-      <input type="range" id="t1" min="10" max="200" value="60" oninput="updateSliders()" />
+      <input type="range" id="inset-thresh" min="1" max="14" value="4" oninput="onControlChange()" onchange="onControlChange()" />
     </div>
 
-    <div class="action-row">
-      <button class="action-btn" onclick="flipCamera()">Switch Camera</button>
-      <button class="action-btn" style="background: #334155;" onclick="toggleFreeze()" id="freeze-btn">Freeze</button>
+    <div class="action-grid">
+      <button class="action-btn upload" onclick="triggerPhotoUpload()">Upload Photo</button>
+      <button class="action-btn" id="cam-btn" onclick="handleCameraButton()">Live Camera</button>
+      <button class="action-btn secondary" onclick="toggleFreeze()" id="freeze-btn">Freeze</button>
     </div>
   </div>
 
-  <div id="status-bar">Initializing runtime...</div>
+  <div id="status-bar">Ready — Peel (Green) &gt; Pith (Cyan) &gt; Pulp (Coral).</div>
 
   <script>
-    let activeMode = 'debridement';
+    let activeMode = 'fill';
+    let sourceMode = 'none';
     let currentFacing = 'environment';
     let isFrozen = false;
-    let isProcessing = false;
-    let cvReady = false;
-
-    // Offscreen canvas for safe cross-browser frame extraction
-    const grabCanvas = document.createElement('canvas');
-    const grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true });
-
-    // Reusable OpenCV Matrices
-    let src, rgb, hsv, blur, gray, dst;
-    let orangeMask, pithMask, fruitMask, innerPulpMask, kernel;
-
-    let lastFrameTime = performance.now();
-    let frameCounter = 0;
+    let isStreaming = false;
+    let uploadedImage = null;
 
     const video = document.getElementById('webcam');
-    const canvas = document.getElementById('output-canvas');
-    const loader = document.getElementById('loader');
-    const loaderMsg = document.getElementById('loader-msg');
-    const manualBtn = document.getElementById('manual-start-btn');
+    const outCanvas = document.getElementById('output-canvas');
+    const outCtx = outCanvas.getContext('2d');
+    const emptyPrompt = document.getElementById('empty-prompt');
     const fpsMeter = document.getElementById('fps-meter');
     const statusBar = document.getElementById('status-bar');
+    const camBtn = document.getElementById('cam-btn');
+    const freezeBtn = document.getElementById('freeze-btn');
 
-    var Module = {
-      onRuntimeInitialized() {
-        cvReady = true;
-        loaderMsg.textContent = "Requesting camera access...";
-        statusBar.textContent = "OpenCV ready. Starting camera...";
-        startCamera(currentFacing);
+    const workCanvas = document.createElement('canvas');
+    const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+
+    const maskCanvas = document.createElement('canvas');
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+
+    let lastFrameTime = performance.now();
+    let frameCount = 0;
+
+    function onControlChange() {
+      document.getElementById('sat-val').textContent = document.getElementById('sat-thresh').value + '%';
+      document.getElementById('val-val').textContent = document.getElementById('val-thresh').value + '%';
+      document.getElementById('inset-val').textContent = document.getElementById('inset-thresh').value + ' px';
+
+      if (sourceMode === 'photo' && uploadedImage) {
+        processImageSource(uploadedImage);
       }
-    };
-
-    function updateSliders() {
-      document.getElementById('sat-val').textContent = document.getElementById('sat-thresh').value;
-      document.getElementById('val-val').textContent = document.getElementById('val-thresh').value;
-      document.getElementById('t1-val').textContent = document.getElementById('t1').value;
     }
 
-    function setPipelineMode(mode, btn) {
+    function setPipelineMode(mode) {
       activeMode = mode;
-      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      ['fill', 'outline', 'masks'].forEach(m => {
+        document.getElementById(`btn-${m}`).classList.toggle('active', m === mode);
+      });
+      if (sourceMode === 'photo' && uploadedImage) {
+        processImageSource(uploadedImage);
+      }
+    }
+
+    function triggerPhotoUpload() {
+      document.getElementById('photo-input').click();
+    }
+
+    function handlePhotoUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          stopCameraStream();
+          sourceMode = 'photo';
+          uploadedImage = img;
+          emptyPrompt.style.display = 'none';
+          fpsMeter.textContent = 'PHOTO';
+          camBtn.textContent = 'Live Camera';
+          freezeBtn.disabled = true;
+          freezeBtn.style.opacity = '0.45';
+          processImageSource(img);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      event.target.value = '';
+    }
+
+    function stopCameraStream() {
+      isStreaming = false;
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+      }
+    }
+
+    function handleCameraButton() {
+      if (sourceMode !== 'camera') {
+        startCamera(currentFacing);
+      } else {
+        currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
+        startCamera(currentFacing);
+      }
     }
 
     async function startCamera(facingMode) {
-      isProcessing = false;
-      manualBtn.style.display = 'none';
-
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
-      }
+      stopCameraStream();
+      emptyPrompt.style.display = 'none';
+      statusBar.textContent = 'Requesting camera access...';
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        loaderMsg.textContent = "Camera API unavailable. Ensure you are using HTTPS.";
-        statusBar.textContent = "Error: Requires HTTPS connection.";
+        statusBar.textContent = 'Camera requires HTTPS. Use Upload Photo instead.';
+        emptyPrompt.style.display = 'flex';
         return;
       }
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          }
+          video: { facingMode: { ideal: facingMode }, width: { ideal: 640 }, height: { ideal: 480 } }
         });
-
         video.srcObject = stream;
-
-        // Wait until video actually has valid non-zero frame dimensions
-        await new Promise((resolve) => {
-          const checkReady = () => {
-            if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-              resolve();
-            } else {
-              requestAnimationFrame(checkReady);
-            }
-          };
-          video.onloadedmetadata = () => {
-            video.play().catch(() => {});
-            checkReady();
-          };
-          checkReady();
+        await new Promise(resolve => {
+          const check = () => (video.readyState >= 2 && video.videoWidth > 0) ? resolve() : requestAnimationFrame(check);
+          video.onloadedmetadata = () => { video.play().catch(() => {}); check(); };
+          check();
         });
-
         await video.play();
 
-        const w = video.videoWidth;
-        const h = video.videoHeight;
-
-        canvas.width = w;
-        canvas.height = h;
-        grabCanvas.width = w;
-        grabCanvas.height = h;
-
-        initOpenCVMats(w, h);
-
-        loader.style.opacity = '0';
-        setTimeout(() => { loader.style.display = 'none'; }, 300);
-        statusBar.textContent = `Streaming ${w}x${h} (${facingMode})`;
-
-        isProcessing = true;
-        requestAnimationFrame(renderLoop);
+        sourceMode = 'camera';
+        uploadedImage = null;
+        camBtn.textContent = 'Flip Camera';
+        freezeBtn.disabled = false;
+        freezeBtn.style.opacity = '1';
+        isStreaming = true;
+        requestAnimationFrame(cameraLoop);
       } catch (err) {
-        console.error(err);
-        loaderMsg.textContent = `Camera blocked or failed: ${err.name}`;
-        statusBar.textContent = `${err.name}: ${err.message}`;
-        manualBtn.style.display = 'inline-block';
+        statusBar.textContent = `Camera error (${err.name}): Use Upload Photo.`;
+        emptyPrompt.style.display = 'flex';
       }
     }
 
-    function initOpenCVMats(w, h) {
-      [src, rgb, hsv, blur, gray, dst, orangeMask, pithMask, fruitMask, innerPulpMask, kernel].forEach(m => {
-        if (m) m.delete();
-      });
-
-      src = new cv.Mat(h, w, cv.CV_8UC4);
-      rgb = new cv.Mat(h, w, cv.CV_8UC3);
-      hsv = new cv.Mat(h, w, cv.CV_8UC3);
-      gray = new cv.Mat(h, w, cv.CV_8UC1);
-      blur = new cv.Mat(h, w, cv.CV_8UC1);
-      dst = new cv.Mat(h, w, cv.CV_8UC1);
-
-      orangeMask = new cv.Mat(h, w, cv.CV_8UC1);
-      pithMask = new cv.Mat(h, w, cv.CV_8UC1);
-      fruitMask = new cv.Mat(h, w, cv.CV_8UC1);
-      innerPulpMask = new cv.Mat(h, w, cv.CV_8UC1);
-
-      kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
-    }
-
-    function renderLoop() {
-      if (!isProcessing || !cvReady) return;
-
+    function cameraLoop() {
+      if (!isStreaming || sourceMode !== 'camera') return;
       if (!isFrozen && video.readyState >= 2) {
-        try {
-          // Safely extract pixels via 2D context (avoids cv.VideoCapture mobile crashes)
-          grabCtx.drawImage(video, 0, 0, grabCanvas.width, grabCanvas.height);
-          const imgData = grabCtx.getImageData(0, 0, grabCanvas.width, grabCanvas.height);
-          src.data.set(imgData.data);
-
-          const satThresh = parseInt(document.getElementById('sat-thresh').value);
-          const valThresh = parseInt(document.getElementById('val-thresh').value);
-          const t1 = parseFloat(document.getElementById('t1').value);
-
-          if (activeMode === 'debridement' || activeMode === 'masks') {
-            cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
-            cv.GaussianBlur(rgb, rgb, new cv.Size(5, 5), 0);
-            cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
-
-            // 1. Orange Color Mask
-            let lowOrange = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [4, satThresh, 65, 0]);
-            let highOrange = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [26, 255, 255, 255]);
-            cv.inRange(hsv, lowOrange, highOrange, orangeMask);
-            lowOrange.delete(); highOrange.delete();
-
-            // 2. White Pith Mask
-            let lowPith = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, valThresh, 0]);
-            let highPith = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, satThresh, 255, 255]);
-            cv.inRange(hsv, lowPith, highPith, pithMask);
-            lowPith.delete(); highPith.delete();
-
-            cv.morphologyEx(orangeMask, orangeMask, cv.MORPH_CLOSE, kernel);
-            cv.morphologyEx(pithMask, pithMask, cv.MORPH_CLOSE, kernel);
-
-            cv.bitwise_or(orangeMask, pithMask, fruitMask);
-            cv.morphologyEx(fruitMask, fruitMask, cv.MORPH_CLOSE, kernel);
-
-            if (activeMode === 'masks') {
-              let maskVis = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC4);
-              let greenColor = new cv.Mat(src.rows, src.cols, cv.CV_8UC4, [34, 197, 94, 255]);
-              let cyanColor = new cv.Mat(src.rows, src.cols, cv.CV_8UC4, [56, 189, 248, 255]);
-              greenColor.copyTo(maskVis, orangeMask);
-              cyanColor.copyTo(maskVis, pithMask);
-              cv.imshow('output-canvas', maskVis);
-              maskVis.delete(); greenColor.delete(); cyanColor.delete();
-            } else {
-              let contours = new cv.MatVector();
-              let hierarchy = new cv.Mat();
-              cv.findContours(fruitMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-              let maxArea = 0;
-              let maxIdx = -1;
-              for (let i = 0; i < contours.size(); ++i) {
-                let area = cv.contourArea(contours.get(i));
-                if (area > maxArea && area > 2000) {
-                  maxArea = area;
-                  maxIdx = i;
-                }
-              }
-
-              if (maxIdx !== -1) {
-                let wholeOrangeSolid = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
-                cv.drawContours(wholeOrangeSolid, contours, maxIdx, new cv.Scalar(255), -1);
-
-                // Region 1: OUTER PEEL (Green)
-                cv.drawContours(src, contours, maxIdx, new cv.Scalar(34, 197, 94, 255), 4);
-
-                // Region 2: WHITE PITH inside Peel (Cyan)
-                let internalPith = new cv.Mat();
-                cv.bitwise_and(pithMask, wholeOrangeSolid, internalPith);
-
-                let pithContours = new cv.MatVector();
-                let pithHier = new cv.Mat();
-                cv.findContours(internalPith, pithContours, pithHier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-                let pithSolid = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
-                for (let j = 0; j < pithContours.size(); ++j) {
-                  if (cv.contourArea(pithContours.get(j)) > 500) {
-                    cv.drawContours(src, pithContours, j, new cv.Scalar(56, 189, 248, 255), 3);
-                    cv.drawContours(pithSolid, pithContours, j, new cv.Scalar(255), -1);
-                  }
-                }
-
-                // Region 3: INNER PULP inside Pith (Coral/Red)
-                cv.bitwise_and(orangeMask, pithSolid, innerPulpMask);
-                let pulpContours = new cv.MatVector();
-                let pulpHier = new cv.Mat();
-                cv.findContours(innerPulpMask, pulpContours, pulpHier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-                for (let k = 0; k < pulpContours.size(); ++k) {
-                  if (cv.contourArea(pulpContours.get(k)) > 250) {
-                    cv.drawContours(src, pulpContours, k, new cv.Scalar(244, 63, 94, 255), 3);
-                  }
-                }
-
-                wholeOrangeSolid.delete();
-                internalPith.delete();
-                pithContours.delete(); pithHier.delete();
-                pithSolid.delete();
-                pulpContours.delete(); pulpHier.delete();
-              }
-
-              contours.delete();
-              hierarchy.delete();
-              cv.imshow('output-canvas', src);
-            }
-          } else {
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-
-            if (activeMode === 'canny') {
-              cv.Canny(blur, dst, t1, t1 * 2, 3, false);
-              cv.imshow('output-canvas', dst);
-            } else {
-              cv.Sobel(blur, dst, cv.CV_8U, 1, 1, 3, 1, 0, cv.BORDER_DEFAULT);
-              cv.imshow('output-canvas', dst);
-            }
-          }
-
-          frameCounter++;
-          const now = performance.now();
-          if (now - lastFrameTime >= 1000) {
-            fpsMeter.textContent = `${frameCounter} FPS`;
-            frameCounter = 0;
-            lastFrameTime = now;
-          }
-        } catch (e) {
-          statusBar.textContent = `Loop error: ${e.message || e}`;
-          console.error(e);
+        processImageSource(video, video.videoWidth, video.videoHeight);
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFrameTime >= 1000) {
+          fpsMeter.textContent = `${frameCount} FPS`;
+          frameCount = 0;
+          lastFrameTime = now;
         }
       }
-
-      requestAnimationFrame(renderLoop);
-    }
-
-    function flipCamera() {
-      currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
-      loader.style.display = 'flex';
-      loader.style.opacity = '1';
-      loaderMsg.textContent = "Switching camera...";
-      startCamera(currentFacing);
+      requestAnimationFrame(cameraLoop);
     }
 
     function toggleFreeze() {
+      if (sourceMode !== 'camera') return;
       isFrozen = !isFrozen;
-      const btn = document.getElementById('freeze-btn');
-      btn.textContent = isFrozen ? 'Resume' : 'Freeze';
-      btn.style.background = isFrozen ? '#ef4444' : '#334155';
+      freezeBtn.textContent = isFrozen ? 'Resume' : 'Freeze';
+      freezeBtn.style.background = isFrozen ? '#ef4444' : '#334155';
+    }
+
+    function computeConvexHull(points) {
+      if (points.length <= 3) return points;
+      points.sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
+      const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+      const lower = [];
+      for (let i = 0; i < points.length; i++) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], points[i]) <= 0) lower.pop();
+        lower.push(points[i]);
+      }
+      const upper = [];
+      for (let i = points.length - 1; i >= 0; i--) {
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], points[i]) <= 0) upper.pop();
+        upper.push(points[i]);
+      }
+      upper.pop();
+      lower.pop();
+      return lower.concat(upper);
+    }
+
+    function polygonArea(pts) {
+      let area = 0;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        area += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+      }
+      return Math.abs(area / 2);
+    }
+
+    function polygonPerimeter(pts) {
+      let peri = 0;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        peri += Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y);
+      }
+      return peri;
+    }
+
+    function drawHullPath(ctx, pts) {
+      if (!pts || pts.length < 3) return;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+    }
+
+    // Shrink a convex polygon radially toward its centroid by `insetPx`
+    function insetPolygon(pts, insetPx) {
+      if (!pts || pts.length < 3 || insetPx <= 0) return pts;
+      let cx = 0, cy = 0;
+      for (let i = 0; i < pts.length; i++) {
+        cx += pts[i].x;
+        cy += pts[i].y;
+      }
+      cx /= pts.length;
+      cy /= pts.length;
+
+      return pts.map(p => {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= insetPx + 2) return { x: cx, y: cy };
+        const scale = (dist - insetPx) / dist;
+        return { x: cx + dx * scale, y: cy + dy * scale };
+      });
+    }
+
+    function updateAreaReadout(peelPx, pithPx, pulpPx) {
+      const total = peelPx + pithPx + pulpPx;
+      if (total <= 0) {
+        ['peel', 'pith', 'pulp'].forEach(k => {
+          document.getElementById(`pct-${k}`).textContent = '0.0%';
+          document.getElementById(`bar-${k}`).style.width = '0%';
+        });
+        return;
+      }
+      const pPeel = ((peelPx / total) * 100).toFixed(1);
+      const pPith = ((pithPx / total) * 100).toFixed(1);
+      const pPulp = Math.max(0, 100 - parseFloat(pPeel) - parseFloat(pPith)).toFixed(1);
+
+      document.getElementById('pct-peel').textContent = `${pPeel}%`;
+      document.getElementById('bar-peel').style.width = `${pPeel}%`;
+      document.getElementById('pct-pith').textContent = `${pPith}%`;
+      document.getElementById('bar-pith').style.width = `${pPith}%`;
+      document.getElementById('pct-pulp').textContent = `${pPulp}%`;
+      document.getElementById('bar-pulp').style.width = `${pPulp}%`;
+    }
+
+    function processImageSource(source, rawW, rawH) {
+      const t0 = performance.now();
+      const srcW = rawW || source.naturalWidth || source.width;
+      const srcH = rawH || source.naturalHeight || source.height;
+      if (!srcW || !srcH) return;
+
+      const maxDim = 420;
+      let w = srcW, h = srcH;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+        else { w = Math.round((w * maxDim) / h); h = maxDim; }
+      }
+
+      workCanvas.width = w;
+      workCanvas.height = h;
+      outCanvas.width = w;
+      outCanvas.height = h;
+      maskCanvas.width = w;
+      maskCanvas.height = h;
+
+      workCtx.drawImage(source, 0, 0, w, h);
+      const imgData = workCtx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+
+      const satCutoff = parseInt(document.getElementById('sat-thresh').value) / 100;
+      const valCutoff = parseInt(document.getElementById('val-thresh').value) / 100;
+      const insetPx = parseInt(document.getElementById('inset-thresh').value);
+
+      // 1 = Orange (Peel or Inner Pulp), 2 = White Pith
+      const cls = new Uint8Array(w * h);
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+        const r = data[i] / 255;
+        const g = data[i + 1] / 255;
+        const b = data[i + 2] / 255;
+
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const d = max - min;
+        const v = max;
+        const s = max === 0 ? 0 : d / max;
+
+        if (v < 0.14) continue;
+
+        let hDeg = 0;
+        if (d > 0) {
+          if (max === r) hDeg = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+          else if (max === g) hDeg = ((b - r) / d + 2) * 60;
+          else hDeg = ((r - g) / d + 4) * 60;
+        }
+
+        if (hDeg >= 8 && hDeg <= 56 && s >= satCutoff && v >= 0.16) {
+          cls[p] = 1;
+        } else if (s < satCutoff && v >= valCutoff) {
+          cls[p] = 2;
+        }
+      }
+
+      const visited = new Uint8Array(w * h);
+      const queue = new Int32Array(w * h);
+      let bestCrossSectionScore = 0;
+      let bestPeelHull = null;
+      let bestPithHull = null;
+      let bestPulpHull = null;
+
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const startIdx = y * w + x;
+          if (cls[startIdx] === 0 || visited[startIdx]) continue;
+
+          let head = 0, tail = 0;
+          queue[tail++] = startIdx;
+          visited[startIdx] = 1;
+
+          const edgePts = [];
+          const allPithPts = [];
+          let totalCount = 0;
+          let pithCount = 0;
+
+          while (head < tail) {
+            const idx = queue[head++];
+            const cx = idx % w;
+            const cy = (idx - cx) / w;
+            totalCount++;
+
+            if (cls[idx] === 2) {
+              pithCount++;
+              allPithPts.push({ x: cx, y: cy });
+            }
+
+            let isBoundary = false;
+            const nbs = [idx - 1, idx + 1, idx - w, idx + w];
+            for (let n = 0; n < 4; n++) {
+              const nb = nbs[n];
+              if (nb < 0 || nb >= w * h || cls[nb] === 0) {
+                isBoundary = true;
+              } else if (!visited[nb]) {
+                visited[nb] = 1;
+                queue[tail++] = nb;
+              }
+            }
+            if (isBoundary) edgePts.push({ x: cx, y: cy });
+          }
+
+          if (totalCount < 800 || edgePts.length < 10) continue;
+
+          const peelHull = computeConvexHull(edgePts);
+          const hullArea = polygonArea(peelHull);
+          const hullPeri = polygonPerimeter(peelHull);
+          const circularity = hullPeri > 0 ? (4 * Math.PI * hullArea) / (hullPeri * hullPeri) : 0;
+
+          if (circularity < 0.55) continue;
+
+          const pithRatio = pithCount / totalCount;
+          const crossWeight = pithRatio > 0.06 ? (1 + pithRatio * 12) : 0.05;
+          const score = hullArea * circularity * crossWeight;
+
+          if (score > bestCrossSectionScore && allPithPts.length > 30) {
+            bestCrossSectionScore = score;
+            bestPeelHull = peelHull;
+
+            // 1. Inset Peel by `insetPx` to define the strict maximum outer boundary of the White Pith
+            const maxPithBoundary = insetPolygon(peelHull, insetPx);
+            maskCtx.clearRect(0, 0, w, h);
+            maskCtx.fillStyle = '#ffffff';
+            drawHullPath(maskCtx, maxPithBoundary);
+            maskCtx.fill();
+            const peelInnerMask = maskCtx.getImageData(0, 0, w, h).data;
+
+            // Keep only white pith pixels strictly inside the inset peel boundary
+            const validPithPts = [];
+            for (let k = 0; k < allPithPts.length; k++) {
+              const pt = allPithPts[k];
+              if (peelInnerMask[(pt.y * w + pt.x) * 4] > 128) {
+                validPithPts.push(pt);
+              }
+            }
+
+            if (validPithPts.length > 20) {
+              bestPithHull = computeConvexHull(validPithPts);
+
+              // 2. Inset Pith by `insetPx` to define the strict maximum outer boundary of the Inner Pulp
+              // (Guarantees Inner Pulp NEVER spills over the White Pith ring!)
+              const maxPulpBoundary = insetPolygon(bestPithHull, insetPx);
+              maskCtx.clearRect(0, 0, w, h);
+              maskCtx.fillStyle = '#ffffff';
+              drawHullPath(maskCtx, maxPulpBoundary);
+              maskCtx.fill();
+              const pithInnerMask = maskCtx.getImageData(0, 0, w, h).data;
+
+              // Collect high-saturation orange pixels strictly inside `maxPulpBoundary`
+              const pulpPts = [];
+              for (let py = 0; py < h; py += 2) {
+                for (let px = 0; px < w; px += 2) {
+                  const pIdx = py * w + px;
+                  if (cls[pIdx] === 1 && pithInnerMask[pIdx * 4] > 128) {
+                    pulpPts.push({ x: px, y: py });
+                  }
+                }
+              }
+
+              bestPulpHull = pulpPts.length > 15 ? computeConvexHull(pulpPts) : null;
+            } else {
+              bestPithHull = null;
+              bestPulpHull = null;
+            }
+          }
+        }
+      }
+
+      if (!bestPeelHull) {
+        outCtx.drawImage(workCanvas, 0, 0);
+        updateAreaReadout(0, 0, 0);
+        statusBar.textContent = 'No cut orange detected — adjust Brightness or Saturation sliders.';
+        return;
+      }
+
+      // Rasterize strictly ordered nested regions (Outside -> In: Peel -> Pith -> Pulp)
+      maskCtx.clearRect(0, 0, w, h);
+
+      // Layer 1: Outer Peel (Red channel)
+      maskCtx.fillStyle = 'rgb(255, 0, 0)';
+      drawHullPath(maskCtx, bestPeelHull);
+      maskCtx.fill();
+
+      // Layer 2: White Pith inside Peel (Green channel overwrites Red)
+      if (bestPithHull) {
+        maskCtx.fillStyle = 'rgb(0, 255, 0)';
+        drawHullPath(maskCtx, bestPithHull);
+        maskCtx.fill();
+      }
+
+      // Layer 3: Inner Pulp inside Pith (Blue channel overwrites Green)
+      if (bestPulpHull) {
+        maskCtx.fillStyle = 'rgb(0, 0, 255)';
+        drawHullPath(maskCtx, bestPulpHull);
+        maskCtx.fill();
+      }
+
+      const labelData = maskCtx.getImageData(0, 0, w, h).data;
+      let peelPx = 0, pithPx = 0, pulpPx = 0;
+      for (let i = 0; i < labelData.length; i += 4) {
+        if (labelData[i + 2] > 128) pulpPx++;
+        else if (labelData[i + 1] > 128) pithPx++;
+        else if (labelData[i] > 128) peelPx++;
+      }
+
+      updateAreaReadout(peelPx, pithPx, pulpPx);
+
+      if (activeMode === 'masks') {
+        const outImg = outCtx.createImageData(w, h);
+        const od = outImg.data;
+        for (let i = 0; i < labelData.length; i += 4) {
+          if (labelData[i + 2] > 128) {
+            od[i] = 244; od[i + 1] = 63; od[i + 2] = 94; od[i + 3] = 255; // Coral Inner Pulp
+          } else if (labelData[i + 1] > 128) {
+            od[i] = 56; od[i + 1] = 189; od[i + 2] = 248; od[i + 3] = 255; // Cyan White Pith
+          } else if (labelData[i] > 128) {
+            od[i] = 34; od[i + 1] = 197; od[i + 2] = 94; od[i + 3] = 255; // Green Outer Peel
+          } else {
+            od[i] = 2; od[i + 1] = 6; od[i + 2] = 23; od[i + 3] = 255;
+          }
+        }
+        outCtx.putImageData(outImg, 0, 0);
+      } else {
+        outCtx.drawImage(workCanvas, 0, 0);
+
+        if (activeMode === 'fill') {
+          // Paint mutually-exclusive label regions directly so fills never stack/muddy
+          const outImg = outCtx.getImageData(0, 0, w, h);
+          const od = outImg.data;
+          for (let i = 0; i < labelData.length; i += 4) {
+            if (labelData[i + 2] > 128) {
+              // Inner Pulp (Coral tint)
+              od[i] = Math.round(od[i] * 0.55 + 244 * 0.45);
+              od[i + 1] = Math.round(od[i + 1] * 0.55 + 63 * 0.45);
+              od[i + 2] = Math.round(od[i + 2] * 0.55 + 94 * 0.45);
+            } else if (labelData[i + 1] > 128) {
+              // White Pith (Cyan tint)
+              od[i] = Math.round(od[i] * 0.45 + 56 * 0.55);
+              od[i + 1] = Math.round(od[i + 1] * 0.45 + 189 * 0.55);
+              od[i + 2] = Math.round(od[i + 2] * 0.45 + 248 * 0.55);
+            } else if (labelData[i] > 128) {
+              // Outer Peel (Green tint)
+              od[i] = Math.round(od[i] * 0.45 + 34 * 0.55);
+              od[i + 1] = Math.round(od[i + 1] * 0.45 + 197 * 0.55);
+              od[i + 2] = Math.round(od[i + 2] * 0.45 + 94 * 0.55);
+            }
+          }
+          outCtx.putImageData(outImg, 0, 0);
+        }
+
+        // Crisp concentric rings
+        outCtx.lineWidth = 3;
+        outCtx.strokeStyle = '#22c55e';
+        drawHullPath(outCtx, bestPeelHull);
+        outCtx.stroke();
+
+        if (bestPithHull) {
+          outCtx.strokeStyle = '#38bdf8';
+          drawHullPath(outCtx, bestPithHull);
+          outCtx.stroke();
+        }
+
+        if (bestPulpHull) {
+          outCtx.strokeStyle = '#f43f5e';
+          drawHullPath(outCtx, bestPulpHull);
+          outCtx.stroke();
+        }
+      }
+
+      const elapsed = Math.round(performance.now() - t0);
+      statusBar.textContent = `Segmented in ${elapsed}ms • Peel > Pith > Pulp`;
     }
   </script>
-
-  <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
 </body>
 </html>
