@@ -114,11 +114,21 @@
       justify-content: center;
     }
 
+    /* Keep video rendered (not display:none) so mobile browsers never pause frame decoding */
     #webcam {
-      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.01;
+      pointer-events: none;
     }
 
     #output-canvas {
+      position: relative;
+      z-index: 2;
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -134,6 +144,8 @@
       justify-content: center;
       gap: 12px;
       z-index: 20;
+      padding: 20px;
+      text-align: center;
       transition: opacity 0.3s ease;
     }
 
@@ -241,19 +253,14 @@
       cursor: pointer;
     }
 
-    .code-preview {
+    #status-bar {
       width: 100%;
       max-width: 520px;
-      margin-top: 10px;
-      background: #020617;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px;
+      margin-top: 8px;
       font-family: monospace;
-      font-size: 0.68rem;
-      color: #cbd5e1;
-      line-height: 1.4;
-      overflow-x: auto;
+      font-size: 0.7rem;
+      color: #94a3b8;
+      text-align: center;
     }
   </style>
 </head>
@@ -264,7 +271,6 @@
     <div id="fps-meter">0 FPS</div>
   </header>
 
-  <!-- Color Legend for the 3 Anatomical Regions -->
   <div class="legend">
     <div class="legend-item"><span class="dot" style="background:#22c55e;"></span>1. Outer Peel</div>
     <div class="legend-item"><span class="dot" style="background:#38bdf8;"></span>2. White Pith</div>
@@ -274,7 +280,8 @@
   <div class="viewport-container">
     <div id="loader" class="loader-overlay">
       <div class="spinner"></div>
-      <div id="loader-msg" style="font-size: 0.85rem; color: var(--muted);">Loading OpenCV.js...</div>
+      <div id="loader-msg" style="font-size: 0.85rem; color: var(--text);">Loading OpenCV.js...</div>
+      <button id="manual-start-btn" class="action-btn" style="display:none; max-width:200px; margin-top:8px;" onclick="startCamera(currentFacing)">Tap to Start Camera</button>
     </div>
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="output-canvas"></canvas>
@@ -318,12 +325,7 @@
     </div>
   </div>
 
-  <div class="code-preview" id="py-sync">
-# Python Equivalent: 3-Region HSV Segmentation<br/>
-hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)<br/>
-orange_mask = cv2.inRange(hsv, (5, 105, 80), (25, 255, 255))<br/>
-pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
-  </div>
+  <div id="status-bar">Initializing runtime...</div>
 
   <script>
     let activeMode = 'debridement';
@@ -332,10 +334,13 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
     let isProcessing = false;
     let cvReady = false;
 
+    // Offscreen canvas for safe cross-browser frame extraction
+    const grabCanvas = document.createElement('canvas');
+    const grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true });
+
     // Reusable OpenCV Matrices
     let src, rgb, hsv, blur, gray, dst;
     let orangeMask, pithMask, fruitMask, innerPulpMask, kernel;
-    let cap;
 
     let lastFrameTime = performance.now();
     let frameCounter = 0;
@@ -344,52 +349,43 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
     const canvas = document.getElementById('output-canvas');
     const loader = document.getElementById('loader');
     const loaderMsg = document.getElementById('loader-msg');
+    const manualBtn = document.getElementById('manual-start-btn');
     const fpsMeter = document.getElementById('fps-meter');
+    const statusBar = document.getElementById('status-bar');
 
     var Module = {
       onRuntimeInitialized() {
         cvReady = true;
-        loaderMsg.textContent = "Starting camera...";
+        loaderMsg.textContent = "Requesting camera access...";
+        statusBar.textContent = "OpenCV ready. Starting camera...";
         startCamera(currentFacing);
       }
     };
 
     function updateSliders() {
-      const sat = document.getElementById('sat-thresh').value;
-      const val = document.getElementById('val-thresh').value;
-      const t1 = document.getElementById('t1').value;
-
-      document.getElementById('sat-val').textContent = sat;
-      document.getElementById('val-val').textContent = val;
-      document.getElementById('t1-val').textContent = t1;
-
-      updatePythonSnippet(sat, val, t1);
+      document.getElementById('sat-val').textContent = document.getElementById('sat-thresh').value;
+      document.getElementById('val-val').textContent = document.getElementById('val-thresh').value;
+      document.getElementById('t1-val').textContent = document.getElementById('t1').value;
     }
 
     function setPipelineMode(mode, btn) {
       activeMode = mode;
       document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      updateSliders();
-    }
-
-    function updatePythonSnippet(sat, val, t1) {
-      const el = document.getElementById('py-sync');
-      if (activeMode === 'debridement') {
-        el.innerHTML = `# Python Equivalent: 3-Zone Segmentation<br/>hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)<br/>orange_mask = cv2.inRange(hsv, (4, ${sat}, 70), (26, 255, 255))<br/>pith_mask = cv2.inRange(hsv, (0, 0, ${val}), (180, ${sat}, 255))`;
-      } else if (activeMode === 'masks') {
-        el.innerHTML = `# Visualizing Raw Color Masks (Green=Orange, Blue=Pith)<br/>combined = cv2.bitwise_or(orange_mask, pith_mask)`;
-      } else if (activeMode === 'canny') {
-        el.innerHTML = `# Canny Edge Detection<br/>edges = cv2.Canny(blur, threshold1=${t1}, threshold2=${t1 * 2})`;
-      } else {
-        el.innerHTML = `# Sobel Gradient Magnitude<br/>sobel = cv2.Sobel(blur, cv2.CV_8U, 1, 1, ksize=3)`;
-      }
     }
 
     async function startCamera(facingMode) {
       isProcessing = false;
+      manualBtn.style.display = 'none';
+
       if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        loaderMsg.textContent = "Camera API unavailable. Ensure you are using HTTPS.";
+        statusBar.textContent = "Error: Requires HTTPS connection.";
+        return;
       }
 
       try {
@@ -403,22 +399,46 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
         });
 
         video.srcObject = stream;
-        await new Promise(resolve => { video.onloadedmetadata = () => resolve(); });
+
+        // Wait until video actually has valid non-zero frame dimensions
+        await new Promise((resolve) => {
+          const checkReady = () => {
+            if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+              resolve();
+            } else {
+              requestAnimationFrame(checkReady);
+            }
+          };
+          video.onloadedmetadata = () => {
+            video.play().catch(() => {});
+            checkReady();
+          };
+          checkReady();
+        });
+
         await video.play();
 
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
+        const w = video.videoWidth;
+        const h = video.videoHeight;
 
-        initOpenCVMats(canvas.width, canvas.height);
+        canvas.width = w;
+        canvas.height = h;
+        grabCanvas.width = w;
+        grabCanvas.height = h;
+
+        initOpenCVMats(w, h);
 
         loader.style.opacity = '0';
-        setTimeout(() => loader.style.display = 'none', 300);
+        setTimeout(() => { loader.style.display = 'none'; }, 300);
+        statusBar.textContent = `Streaming ${w}x${h} (${facingMode})`;
 
         isProcessing = true;
         requestAnimationFrame(renderLoop);
       } catch (err) {
         console.error(err);
-        loaderMsg.textContent = "Camera error: Please allow camera access.";
+        loaderMsg.textContent = `Camera blocked or failed: ${err.name}`;
+        statusBar.textContent = `${err.name}: ${err.message}`;
+        manualBtn.style.display = 'inline-block';
       }
     }
 
@@ -440,49 +460,46 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
       innerPulpMask = new cv.Mat(h, w, cv.CV_8UC1);
 
       kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
-      cap = new cv.VideoCapture(video);
     }
 
     function renderLoop() {
       if (!isProcessing || !cvReady) return;
 
-      if (!isFrozen) {
+      if (!isFrozen && video.readyState >= 2) {
         try {
-          cap.read(src);
+          // Safely extract pixels via 2D context (avoids cv.VideoCapture mobile crashes)
+          grabCtx.drawImage(video, 0, 0, grabCanvas.width, grabCanvas.height);
+          const imgData = grabCtx.getImageData(0, 0, grabCanvas.width, grabCanvas.height);
+          src.data.set(imgData.data);
 
           const satThresh = parseInt(document.getElementById('sat-thresh').value);
           const valThresh = parseInt(document.getElementById('val-thresh').value);
           const t1 = parseFloat(document.getElementById('t1').value);
 
           if (activeMode === 'debridement' || activeMode === 'masks') {
-            // Convert RGBA -> RGB -> HSV
             cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
             cv.GaussianBlur(rgb, rgb, new cv.Size(5, 5), 0);
             cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
 
-            // 1. Detect Orange Color (Outer Peel + Inner Pulp)
-            // OpenCV Hue for orange/yellow is roughly 4 to 26
+            // 1. Orange Color Mask
             let lowOrange = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [4, satThresh, 65, 0]);
             let highOrange = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [26, 255, 255, 255]);
             cv.inRange(hsv, lowOrange, highOrange, orangeMask);
             lowOrange.delete(); highOrange.delete();
 
-            // 2. Detect White Pith (Low Saturation, High Brightness)
+            // 2. White Pith Mask
             let lowPith = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, valThresh, 0]);
             let highPith = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, satThresh, 255, 255]);
             cv.inRange(hsv, lowPith, highPith, pithMask);
             lowPith.delete(); highPith.delete();
 
-            // Clean up noise using morphological closing
             cv.morphologyEx(orangeMask, orangeMask, cv.MORPH_CLOSE, kernel);
             cv.morphologyEx(pithMask, pithMask, cv.MORPH_CLOSE, kernel);
 
-            // Combine Orange + Pith to get the total fruit silhouette
             cv.bitwise_or(orangeMask, pithMask, fruitMask);
             cv.morphologyEx(fruitMask, fruitMask, cv.MORPH_CLOSE, kernel);
 
             if (activeMode === 'masks') {
-              // Show color-coded segmentation mask
               let maskVis = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC4);
               let greenColor = new cv.Mat(src.rows, src.cols, cv.CV_8UC4, [34, 197, 94, 255]);
               let cyanColor = new cv.Mat(src.rows, src.cols, cv.CV_8UC4, [56, 189, 248, 255]);
@@ -491,7 +508,6 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
               cv.imshow('output-canvas', maskVis);
               maskVis.delete(); greenColor.delete(); cyanColor.delete();
             } else {
-              // Find the largest contour = Region 1: OUTER PEEL
               let contours = new cv.MatVector();
               let hierarchy = new cv.Mat();
               cv.findContours(fruitMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
@@ -500,52 +516,47 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
               let maxIdx = -1;
               for (let i = 0; i < contours.size(); ++i) {
                 let area = cv.contourArea(contours.get(i));
-                if (area > maxArea && area > 2500) {
+                if (area > maxArea && area > 2000) {
                   maxArea = area;
                   maxIdx = i;
                 }
               }
 
               if (maxIdx !== -1) {
-                // Create a solid filled mask of ONLY the whole orange (ignores background white tables/gloves)
                 let wholeOrangeSolid = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
                 cv.drawContours(wholeOrangeSolid, contours, maxIdx, new cv.Scalar(255), -1);
 
-                // Draw Region 1: OUTER PEEL boundary (Green)
+                // Region 1: OUTER PEEL (Green)
                 cv.drawContours(src, contours, maxIdx, new cv.Scalar(34, 197, 94, 255), 4);
 
-                // Restrict Pith mask strictly inside the orange boundary
+                // Region 2: WHITE PITH inside Peel (Cyan)
                 let internalPith = new cv.Mat();
                 cv.bitwise_and(pithMask, wholeOrangeSolid, internalPith);
 
-                // Find contours for Region 2: WHITE PITH (Cyan/Blue)
                 let pithContours = new cv.MatVector();
                 let pithHier = new cv.Mat();
                 cv.findContours(internalPith, pithContours, pithHier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 let pithSolid = cv.Mat.zeros(src.rows, src.cols, cv.CV_8UC1);
                 for (let j = 0; j < pithContours.size(); ++j) {
-                  if (cv.contourArea(pithContours.get(j)) > 600) {
+                  if (cv.contourArea(pithContours.get(j)) > 500) {
                     cv.drawContours(src, pithContours, j, new cv.Scalar(56, 189, 248, 255), 3);
-                    // Fill pith contour to define the interior zone
                     cv.drawContours(pithSolid, pithContours, j, new cv.Scalar(255), -1);
                   }
                 }
 
-                // Region 3: INNER PULP = Orange pixels located INSIDE the white pith ring
+                // Region 3: INNER PULP inside Pith (Coral/Red)
                 cv.bitwise_and(orangeMask, pithSolid, innerPulpMask);
                 let pulpContours = new cv.MatVector();
                 let pulpHier = new cv.Mat();
                 cv.findContours(innerPulpMask, pulpContours, pulpHier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
                 for (let k = 0; k < pulpContours.size(); ++k) {
-                  if (cv.contourArea(pulpContours.get(k)) > 300) {
-                    // Draw Inner Orange Pulp boundary (Coral/Red-Pink)
+                  if (cv.contourArea(pulpContours.get(k)) > 250) {
                     cv.drawContours(src, pulpContours, k, new cv.Scalar(244, 63, 94, 255), 3);
                   }
                 }
 
-                // Clean up temporary mats
                 wholeOrangeSolid.delete();
                 internalPith.delete();
                 pithContours.delete(); pithHier.delete();
@@ -557,9 +568,7 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
               hierarchy.delete();
               cv.imshow('output-canvas', src);
             }
-
           } else {
-            // Classic Edge Modes (Canny / Sobel)
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
 
@@ -572,7 +581,6 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
             }
           }
 
-          // Update FPS
           frameCounter++;
           const now = performance.now();
           if (now - lastFrameTime >= 1000) {
@@ -580,8 +588,8 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
             frameCounter = 0;
             lastFrameTime = now;
           }
-
         } catch (e) {
+          statusBar.textContent = `Loop error: ${e.message || e}`;
           console.error(e);
         }
       }
@@ -591,6 +599,9 @@ pith_mask = cv2.inRange(hsv, (0, 0, 135), (180, 105, 255))
 
     function flipCamera() {
       currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
+      loader.style.display = 'flex';
+      loader.style.opacity = '1';
+      loaderMsg.textContent = "Switching camera...";
       startCamera(currentFacing);
     }
 
